@@ -100,6 +100,9 @@ export default async function DashboardPage() {
             <Link className="button secondary" href="/missions">
               Plan today
             </Link>
+            <Link className="button secondary" href="/review">
+              Review today
+            </Link>
             <Link className="button" href="/quests">
               Quests
             </Link>

@@ -5,7 +5,7 @@ Honest, per-feature status. **Statuses:** ✅ verified · 🟡 partial · ⏭ no
 code merely exists.
 
 _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `npm test`
-(58 passed) · `npm run db:test` (7 migrations, 69 assertions) · `npm run build`._
+(62 passed) · `npm run db:test` (8 migrations, 84 assertions) · `npm run build`._
 
 ## Foundation
 
@@ -51,12 +51,28 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 | Edit a mission plan | ✅ | column-level grant; _"a client can edit a planned mission"_ |
 | Reasons required to skip/block | ✅ | constraint + action validation |
 | Mission XP (+50) and reversal | ✅ | reopen removes, re-complete restores (audit §4.3) |
+| Mission undo (skip/block → planned) | ✅ | "Undo" action; the reason is retracted, because the mission was not really skipped |
 | Habits with weekday schedules | ✅ | `/habits` |
 | Habit logs (SELECT-only for clients) | ✅ | `log_habit` RPC; _"clients cannot write habit logs directly"_ |
 | Streaks (current/longest) | ✅ | `habit_summary`; Mon/Wed/Fri case asserted |
 | 30-day consistency | ✅ | `src/lib/habits.ts`; shown on each habit card |
 | Archive / restore habit | ✅ | `archived_at`, history and XP preserved |
 | Undo a logged day | ✅ | "Undo today" action; XP removed, not duplicated |
+| Backfill a past habit day | ✅ | "Backfill another day" control; one row and one award per day |
+| Future habit days refused | ✅ | database guard against the caller's local today; _"a future habit day is rejected"_
+
+## Day review
+
+| Feature | Status | Evidence / notes |
+| --- | --- | --- |
+| One finished day, end to end | ✅ | `/review?date=` renders `day_summary(date, time_zone)` |
+| XP awarded / adjusted / net | ✅ | the ledger, bucketed by the local date of `awarded_at` |
+| Missions by status | ✅ | counted from `daily_missions` rows with a reason or an outcome shown |
+| Habits logged vs expected | ✅ | expected is reconstructed from `created_at` / `archived_at` + schedule |
+| Achievements unlocked that day | ✅ | from `player_achievements` |
+| Cannot look into the future | ✅ | `resolveReviewDate` clamps to today; `src/lib/review.test.ts` |
+| Date navigation | ✅ | previous / next / today + a date picker (`max` = today) |
+| Read-only by design | ✅ | resolving work stays on `/missions` and `/habits`, which it links to |
 
 ## Command Center
 
@@ -87,16 +103,18 @@ _Last verified: 2026-10-18. Commands: `npm run lint` · `npm run typecheck` · `
 
 ## Not started (roadmap — see `docs/IMPLEMENTATION_PLAN.md`)
 
-| Feature | Status |
-| --- | --- |
-| Undo/redo for skipped/blocked missions | ⏭ |
-| Day review screen | ⏭ |
-| Habit backfill UI | ⏭ |
-| Focus sessions / timer | ⏭ |
-| Manual mission ordering | ⏭ |
-| Finance (accounts, transactions, budgets) | ⏭ |
-| Journal, weekly/monthly reviews | ⏭ |
-| Read-only AI advisor | ⏭ |
+| Feature | Status | Blocked by |
+| --- | --- | --- |
+| Remote Supabase push + production smoke test | 🔒 ⏭ | project owner (credentials, live data) |
+| Focus sessions / timer | ⏭ | nothing — next safe stage (B) |
+| Manual mission ordering UI | ⏭ | nothing — `position` already exists (stage B) |
+| Journal, weekly/monthly reviews | ⏭ | stage D |
+| Scripture and prayer journal | ⏭ | stage D (journal kinds) |
+| Career and learning module | 🟡 | modelable on quests today; module in stage E |
+| Knowledge library | ⏭ | stage E |
+| Finance (accounts, transactions, budgets) | 🟡 | engine tested; tables/UI in stage F |
+| Read-only AI advisor | 🔒 ⏭ | stage F (needs a provider key; read-only half can ship first) |
+| Advanced analytics / trends | 🟡 | `day_summary` exists; trends in stage C |
 
 ## Known limitations
 

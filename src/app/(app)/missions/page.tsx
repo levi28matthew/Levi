@@ -84,15 +84,20 @@ export default async function MissionsPage({
             <p className="eyebrow">Plan a different day</p>
             <p className="muted">Pick any calendar date to plan ahead or review what happened.</p>
           </div>
-          <form method="get" className="row" style={{ alignItems: "flex-end" }}>
-            <div className="field">
-              <label htmlFor="mission-date">Date</label>
-              <input id="mission-date" type="date" name="date" defaultValue={date} required />
-            </div>
-            <button className="button secondary" type="submit">
-              View day
-            </button>
-          </form>
+          <div className="row" style={{ alignItems: "flex-end" }}>
+            <form method="get" className="row" style={{ alignItems: "flex-end" }}>
+              <div className="field">
+                <label htmlFor="mission-date">Date</label>
+                <input id="mission-date" type="date" name="date" defaultValue={date} required />
+              </div>
+              <button className="button secondary" type="submit">
+                View day
+              </button>
+            </form>
+            <Link className="button secondary" href={{ pathname: "/review", query: { date } }}>
+              Review this day
+            </Link>
+          </div>
         </div>
       </Panel>
 

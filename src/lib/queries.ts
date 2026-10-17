@@ -174,6 +174,36 @@ export async function getHabitSummaries(
   return data ?? [];
 }
 
+/**
+ * One local calendar day, summarised by the database from the stored records.
+ * A day with no records is a summary of zeros, not an error.
+ */
+export interface DaySummary {
+  missions_total: number;
+  missions_completed: number;
+  missions_skipped: number;
+  missions_blocked: number;
+  missions_open: number;
+  habits_expected: number;
+  habits_logged: number;
+  xp_awarded: number;
+  xp_adjusted: number;
+  xp_net: number;
+  achievements_unlocked: number;
+}
+
+export async function getDaySummary(
+  supabase: SupabaseServerClient,
+  date: string,
+  timeZone: string,
+): Promise<DaySummary> {
+  const { data, error } = await supabase.rpc("day_summary", { p_date: date, p_time_zone: timeZone });
+  if (error) throw new Error(`Could not load the day summary: ${error.message}`);
+  const row = (data ?? [])[0];
+  if (!row) throw new Error("Could not load the day summary: the database returned no summary row.");
+  return row;
+}
+
 export async function getHabitLogsBetween(
   supabase: SupabaseServerClient,
   from: string,
@@ -194,6 +224,16 @@ export async function getActiveHabits(supabase: SupabaseServerClient): Promise<H
     .select("*")
     .is("archived_at", null)
     .order("created_at");
+  if (error) throw new Error(`Could not load habits: ${error.message}`);
+  return data ?? [];
+}
+
+/**
+ * Every habit, archived included. Used where a saved log must be named but the habit
+ * it belongs to may since have been archived.
+ */
+export async function getAllHabits(supabase: SupabaseServerClient): Promise<HabitRow[]> {
+  const { data, error } = await supabase.from("habits").select("*").order("created_at");
   if (error) throw new Error(`Could not load habits: ${error.message}`);
   return data ?? [];
 }

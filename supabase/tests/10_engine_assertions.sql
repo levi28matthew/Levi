@@ -78,6 +78,10 @@ begin
     raise notice 'ok - an unrecognized time zone is rejected';
   end;
 end $$;
+-- The fixtures below use the database's UTC `current_date` as "today", so the
+-- profile is deliberately left on UTC here. The interaction between the stored
+-- zone and a *local* today is asserted explicitly in its own section later.
+select public.set_time_zone('UTC');
 reset role;
 
 -- ---------------------------------------------------------------------------
@@ -440,6 +444,122 @@ select public.test_assert(
     = (select level from public.player_stats),
   'the latest level-history entry agrees with player stats'
 );
+
+-- ---------------------------------------------------------------------------
+-- Historical day review: one derived summary per local calendar date
+-- ---------------------------------------------------------------------------
+select public.test_assert(
+  (select missions_total from public.day_summary(current_date, 'UTC')) = 2
+    and (select missions_completed from public.day_summary(current_date, 'UTC')) = 1
+    and (select missions_skipped from public.day_summary(current_date, 'UTC')) = 1
+    and (select missions_open from public.day_summary(current_date, 'UTC')) = 0,
+  'a day summary counts only the missions planned for that local day'
+);
+select public.test_assert(
+  (select missions_total from public.day_summary(current_date + 1, 'UTC')) = 1
+    and (select missions_open from public.day_summary(current_date + 1, 'UTC')) = 1,
+  'a mission moved to another day is reported on that day'
+);
+select public.test_assert(
+  (select habits_logged from public.day_summary(current_date, 'UTC')) >= 1
+    and (select habits_expected from public.day_summary(current_date, 'UTC')) >= 1,
+  'a day summary counts the habit that was logged and the habit that was scheduled'
+);
+select public.test_assert(
+  (select xp_net from public.day_summary(current_date, 'UTC'))
+    = (select xp_awarded + xp_adjusted from public.day_summary(current_date, 'UTC')),
+  'the XP net of a day always equals its awards plus its adjustments'
+);
+select public.test_assert(
+  (select achievements_unlocked from public.day_summary(current_date, 'UTC')) = 4
+    and (select xp_awarded from public.day_summary(current_date, 'UTC')) > 0,
+  'a day summary reports the achievements and the XP earned on that day'
+);
+select public.test_assert(
+  (select xp_net from public.day_summary(current_date - 1000, 'UTC')) = 0
+    and (select missions_total from public.day_summary(current_date - 1000, 'UTC')) = 0
+    and (select habits_logged from public.day_summary(current_date - 1000, 'UTC')) = 0,
+  'a day with no records summarises to zeros instead of failing'
+);
+
+-- Backfill: a log written today for an earlier day belongs to that earlier day.
+-- Its XP, however, is recorded when it is awarded — a past day's review is never
+-- rewritten by work recorded later.
+select log_id as backfill_log from public.log_habit(
+  (select id from public.habits where name = 'Train'), current_date - 20, true) \gset
+select id as backfill_award from public.xp_ledger
+  where source = 'habit' and source_id = :'backfill_log' \gset
+
+select public.test_assert(
+  (select habits_logged from public.day_summary(current_date - 20, 'UTC')) = 1
+    and (select habits_expected from public.day_summary(current_date - 20, 'UTC')) = 0,
+  'a backfilled day reports the log, while a habit created later is not expected on it'
+);
+select public.test_assert(
+  (select xp_net from public.day_summary(current_date - 20, 'UTC')) = 0
+    and (select xp_net from public.day_summary(current_date, 'UTC')) >= 20,
+  'backfill records the work on the past day but never rewrites that day''s XP'
+);
+select public.test_assert(
+  (select amount from public.xp_ledger where id = :'backfill_award') = 20
+    and (select reversal_of from public.xp_ledger where id = :'backfill_award') is null,
+  'a backfilled habit day awards the same 20 XP as any other day'
+);
+
+select public.log_habit((select id from public.habits where name = 'Train'), current_date - 20, true);
+select public.test_assert(
+  (select count(*) from public.xp_ledger where source = 'habit' and source_id = :'backfill_log') = 1,
+  'logging the same past day twice still awards XP exactly once'
+);
+
+select public.log_habit((select id from public.habits where name = 'Train'), current_date - 20, false);
+select public.test_assert(
+  (select habits_logged from public.day_summary(current_date - 20, 'UTC')) = 0
+    and (select count(*) from public.xp_ledger where reversal_of = :'backfill_award') = 1,
+  'un-logging a backfilled day withdraws exactly that XP and keeps the audit trail'
+);
+
+-- The future guard is anchored to the caller's local date, not the server's:
+-- twelve hours behind UTC, "tomorrow" on the server is never a valid log date.
+select public.set_time_zone('Etc/GMT+12');
+do $$
+begin
+  begin
+    perform public.log_habit((select id from public.habits where name = 'Train'), current_date + 1, true);
+    raise exception 'ASSERTION FAILED: a habit could be logged for the future';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a future habit day is rejected (%)', sqlerrm;
+  end;
+end $$;
+select public.set_time_zone('UTC');
+select public.log_habit((select id from public.habits where name = 'Train'), current_date - 19, true);
+select public.test_assert(
+  (select habits_logged from public.day_summary(current_date - 19, 'UTC')) = 1,
+  'backfilling a past day still works after the future is rejected'
+);
+
+-- An unrecognised time zone fails loudly instead of reporting the wrong day.
+do $$
+begin
+  begin
+    perform count(*) from public.day_summary(current_date, 'Mars/Olympus_Mons');
+    raise exception 'ASSERTION FAILED: an unrecognized time zone was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a day summary rejects an unrecognized time zone';
+  end;
+end $$;
+
+-- A summary is always scoped to the caller: it can never read across accounts.
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.test_assert(
+  (select missions_total from public.day_summary(current_date, 'UTC')) = 0
+    and (select xp_net from public.day_summary(current_date, 'UTC')) = 0
+    and (select habits_logged from public.day_summary(current_date, 'UTC')) = 0,
+  'another user''s day summary is empty'
+);
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 -- ---------------------------------------------------------------------------
 -- Misuse: adjustments cannot unbalance an award

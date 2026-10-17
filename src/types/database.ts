@@ -272,6 +272,22 @@ export interface Database {
           longest_streak: number;
         }[];
       };
+      day_summary: {
+        Args: { p_date: string; p_time_zone: string };
+        Returns: {
+          missions_total: number;
+          missions_completed: number;
+          missions_skipped: number;
+          missions_blocked: number;
+          missions_open: number;
+          habits_expected: number;
+          habits_logged: number;
+          xp_awarded: number;
+          xp_adjusted: number;
+          xp_net: number;
+          achievements_unlocked: number;
+        }[];
+      };
       sync_achievements: {
         Args: Record<string, never>;
         Returns: { unlocked_achievement_id: string; xp_awarded: number }[];

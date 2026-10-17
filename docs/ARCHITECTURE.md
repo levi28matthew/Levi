@@ -21,7 +21,7 @@ every rule is the same:
 │   the only place that talks to Supabase                         │
 ├─────────────────────────────────────────────────────────────────┤
 │ Domain engines (pure, tested)                                   │
-│   progression.ts · habits.ts · finance.ts · dates.ts            │
+│   progression.ts · habits.ts · finance.ts · dates.ts · review.ts│
 │   input-validation.ts · quest-validation.ts                     │
 ├─────────────────────────────────────────────────────────────────┤
 │ PostgreSQL (supabase/migrations/**)                             │
@@ -146,7 +146,45 @@ The client supplies `mission_date` / `log_date`, so work never lands on the wron
 because the server runs in UTC. Pages resolve "today" once, in
 `getSessionContext()`.
 
-## 7. Authorization
+### 6.1 Backfill, and why the future is refused
+
+A date the user supplies is data, so the database validates it:
+
+- `log_habit` accepts any date **up to the caller's local today**. A past day may be
+  backfilled — real life is recorded late — and a backfilled day keeps its own single row
+  and its own single XP award.
+- A **future** date is rejected (`A habit cannot be logged for a future calendar date`),
+  computed from the zone stored in `profiles.time_zone`. A future day is not evidence of
+  work that happened. The reference is never the server's UTC date: a user twelve hours
+  behind UTC would otherwise be allowed to log the server's tomorrow.
+- A missing date is rejected as well, so a malformed form cannot write an empty day.
+
+## 7. Historical day review
+
+`day_summary(p_date date, p_time_zone text)` returns exactly one row describing one *local*
+calendar date for the caller. It exists so that "what did I actually do on the 12th?" has a
+single authoritative answer instead of one ad-hoc query per screen.
+
+| Column | Source |
+| --- | --- |
+| `missions_total` / `completed` / `skipped` / `blocked` / `open` | `daily_missions` rows with that `mission_date` |
+| `habits_expected` | habits that existed that day (from `created_at` / `archived_at`) and were scheduled for it |
+| `habits_logged` | `habit_logs` marked completed for that date |
+| `xp_awarded` / `xp_adjusted` / `xp_net` | the ledger, bucketed by the **local date of `awarded_at`** |
+| `achievements_unlocked` | `player_achievements` unlocked on that local date |
+
+Two consequences are deliberate:
+
+- **XP belongs to the day it was recorded.** Backfilling a habit from three weeks ago adds
+  its log to *that* day but its XP to *today* — the ledger stays append-only, so a finished
+  review is never rewritten.
+- **A day with no rows is a real answer** (zeros), not an error. An unrecognised time zone,
+  by contrast, raises, so a typo cannot silently report the wrong day.
+
+The screen `/review?date=` renders this row verbatim and computes nothing; the clamp that
+stops a review looking into the future lives in `src/lib/review.ts` and is unit-tested.
+
+## 8. Authorization
 
 - Every table used by a user is protected by **row level security** tied to `auth.uid()`.
 - `player_stats`, `level_history` and `quest_progress` are `security_invoker` views: they
@@ -160,7 +198,7 @@ because the server runs in UTC. Pages resolve "today" once, in
   `completed_at`, `outcome`, `time_zone`, `user_id`) stay writable only through the
   routines that own them.
 
-## 8. Achievements
+## 9. Achievements
 
 `sync_achievements()` is idempotent and re-runnable. It reads the canonical
 `player_stats` snapshot, inserts any newly earned rows into `player_achievements`
@@ -169,14 +207,14 @@ because the server runs in UTC. Pages resolve "today" once, in
 The TS catalogue in `src/lib/progression.ts` is display metadata; the SQL function is the
 authority.
 
-## 9. Money (prepared, not yet wired)
+## 10. Money (prepared, not yet wired)
 
 `src/lib/finance.ts` stores money as **integer minor units + ISO-4217 code** and never
 uses binary floating point. `parseMoney`/`toDecimalString` are exact, currency exponents
 (JPY = 0, KWD = 3 …) are honoured, and `budgetUsage` avoids divide-by-zero. The matching
 SQL storage convention is `numeric`/`bigint` minor units. No table or screen uses it yet.
 
-## 10. Testing strategy
+## 11. Testing strategy
 
 | Layer | How it is verified |
 | --- | --- |
@@ -186,6 +224,6 @@ SQL storage convention is `numeric`/`bigint` minor units. No table or screen use
 | Lint/types | `npm run lint`, `npm run typecheck` |
 
 The SQL harness is the important one: it is what caught the broken
-`complete_quest_step`, the non-replayable migration sequence and the missing XP restore.
-New SQL behaviour is expected to arrive with an assertion in
-`supabase/tests/10_engine_assertions.sql`.
+`complete_quest_step`, the non-replayable migration sequence, the missing XP restore and
+the fact that a future habit day could be logged for XP. New SQL behaviour is expected to
+arrive with an assertion in `supabase/tests/10_engine_assertions.sql`.

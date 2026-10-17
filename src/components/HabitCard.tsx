@@ -1,6 +1,7 @@
 import { ActionButton, ActionForm } from "@/components/ActionForm";
 import { Badge, ProgressBar } from "@/components/ui";
 import { logHabit, setHabitArchived, updateHabit } from "@/app/(app)/habits/actions";
+import { addDays } from "@/lib/dates";
 import type { HabitSummary } from "@/lib/queries";
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -89,7 +90,7 @@ export function HabitCard({
       </div>
 
       <details className="utility">
-        <summary>Edit schedule or archive</summary>
+        <summary>Backfill a day, edit the schedule, or archive</summary>
         <div className="stack" style={{ marginTop: 10 }}>
           <ActionForm
             action={updateHabit}
@@ -132,6 +133,39 @@ export function HabitCard({
                 ))}
               </div>
             </fieldset>
+          </ActionForm>
+
+          <ActionForm
+            action={logHabit}
+            submitLabel="Save that day"
+            submitClassName="button secondary tiny"
+            hidden={{ habitId: habit.habit_id }}
+            resetOnSuccess={false}
+          >
+            <div className="field-row">
+              <div className="field">
+                <label htmlFor={`habit-backfill-${habit.habit_id}`}>Backfill another day</label>
+                <input
+                  id={`habit-backfill-${habit.habit_id}`}
+                  type="date"
+                  name="logDate"
+                  defaultValue={addDays(today, -1)}
+                  max={today}
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor={`habit-backfill-state-${habit.habit_id}`}>What happened</label>
+                <select id={`habit-backfill-state-${habit.habit_id}`} name="completed" defaultValue="true">
+                  <option value="true">Completed (+20 XP)</option>
+                  <option value="false">Not done (breaks the streak)</option>
+                </select>
+              </div>
+            </div>
+            <p className="faint">
+              Only past days can be backfilled, and each day awards its XP once. A backfilled log is recorded on
+              that day; the XP it earns is recorded today, so a finished review is never rewritten.
+            </p>
           </ActionForm>
 
           <ActionForm

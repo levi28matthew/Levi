@@ -19,7 +19,11 @@ export function missionSortKey(mission: MissionRow): number {
 
 /**
  * One mission with every action that is legal for its current state.
- * Completed and skipped work is kept visible — nothing is silently dropped.
+ *
+ * The state machine is explicit: a planned mission can be started; a skipped or
+ * blocked one can be *undone* back to the plan (which retracts the reason, because the
+ * mission was not really skipped); a completed one can be reopened, which withdraws
+ * its XP instead of duplicating it. Nothing is silently dropped.
  */
 export function MissionCard({
   mission,
@@ -71,13 +75,22 @@ export function MissionCard({
             fields={{ missionId: mission.id, status: "completed", outcome: mission.outcome ?? "" }}
           />
         ) : null}
-        {mission.status === "completed" || mission.status === "skipped" || mission.status === "blocked" ? (
+        {mission.status === "completed" ? (
           <ActionButton
             action={reopenMission}
             label="Reopen"
             fields={{ missionId: mission.id }}
             variant="ghost"
             pendingLabel="Reopening…"
+          />
+        ) : null}
+        {mission.status === "skipped" || mission.status === "blocked" ? (
+          <ActionButton
+            action={setMissionStatus}
+            label="Undo"
+            fields={{ missionId: mission.id, status: "planned" }}
+            variant="ghost"
+            pendingLabel="Undoing…"
           />
         ) : null}
       </div>

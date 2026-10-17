@@ -1,6 +1,7 @@
 # LEVI OS — Project Audit
 
-_Last verified: 2026-10-18 · Next.js 16.3.4 (Turbopack) · Node 22_
+_Last verified: 2026-10-18 · Next.js 16.3.4 (Turbopack) · Node 22 · stage A (undo/redo, day
+review, habit backfill) included._
 
 ## 1. Purpose and scope
 
@@ -114,6 +115,31 @@ Wiring the real screens exposed two gaps in the database privileges:
   _"a mission cannot be completed outside set_mission_status"_ and _"the time zone can
   only change through set_time_zone"_.
 
+### 4.7 A habit day could be logged in the future — **medium**
+
+`log_habit` accepted **any** date. A future day is not evidence of work, so a user (or a
+script) could pre-log tomorrow — or next year — and collect 20 XP for each day that had not
+happened yet. The streak rules hid the effect, but the ledger kept the XP.
+
+There was also no way to ask what happened on a *past* day: the Command Center could only
+describe now, and the missions page could only report its own rows.
+
+- **Fix:** `supabase/migrations/20260918120000_day_review_backfill.sql`:
+  - `log_habit` now rejects a **future** date, computed from the caller's stored IANA zone
+    (never the server's UTC date), and a missing date. Backfilling a past day still awards
+    its 20 XP exactly once.
+  - `day_summary(p_date, p_time_zone)` is the single read model for one local calendar day
+    (XP awarded/adjusted/net, missions by status, habits logged vs expected, achievements
+    unlocked), and the new `/review?date=` screen renders it verbatim.
+- **Evidence:** 15 new assertions, including _"a future habit day is rejected"_, _"backfill
+  records the work on the past day but never rewrites that day's XP"_, _"logging the same
+  past day twice still awards XP exactly once"_ and _"another user's day summary is empty"_.
+- **Also corrected in passing:** the SQL fixtures treated the database's UTC `current_date`
+  as "today" while the profile had been switched to `America/Los_Angeles` earlier in the
+  suite. The fixtures now set the zone back to UTC explicitly, and the local-date
+  interaction is asserted in its own section, so the suite no longer depends on the time of
+  day it runs at.
+
 ## 5. Unknowns and risks (do not assume)
 
 | Item | Detail |
@@ -126,13 +152,16 @@ Wiring the real screens exposed two gaps in the database privileges:
 
 ## 6. Baseline verification (real output)
 
+_Stage A (undo/redo, day review, backfill guard) re-ran every script. Numbers below are the
+current, real output._
+
 | Command | Result |
 | --- | --- |
 | `npm run lint` | 0 errors, 0 warnings |
 | `npm run typecheck` | clean (`tsc --noEmit`) |
-| `npm test` | **58 passed** (7 files) |
-| `npm run db:test` | **7 migrations applied, 69 assertions held** |
-| `npm run build` | success; app routes are dynamic (`ƒ`) |
+| `npm test` | **62 passed** (8 files) |
+| `npm run db:test` | **8 migrations applied, 84 assertions held** |
+| `npm run build` | success; app routes are dynamic (`ƒ`), including `/review` |
 
 See `docs/FEATURE_STATUS.md` for a per-feature status table, `docs/ARCHITECTURE.md` for
 the design and invariants, and `docs/IMPLEMENTATION_PLAN.md` for the ordered roadmap.

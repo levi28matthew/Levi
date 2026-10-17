@@ -21,8 +21,10 @@ from it, and nothing is ever hard-coded or sampled.
 - **Missions** (`/missions`) — plan any calendar day; complete, skip or block with a
   reason; carried-over work is surfaced.
 - **Habits** (`/habits`) — weekday schedules, per-day logging, real streaks and 30-day
-  consistency, archive/restore that keeps history.
+  consistency, archive/restore that keeps history, and backfill for a past day.
 - **Quests** (`/quests`) — main quest → subquest → evidenced step, with derived progress.
+- **Day review** (`/review?date=`) — a read-only record of one finished day: XP recorded,
+  missions by status, habits logged vs expected, achievements unlocked.
 - **Settings** (`/settings`) — display name and a server-validated IANA time zone.
 
 ## Local setup
@@ -47,7 +49,7 @@ Run these before trusting any change; they are exactly what CI runs.
 npm run lint        # ESLint
 npm run typecheck   # tsc --noEmit
 npm test            # Vitest unit tests (pure domain engines)
-npm run db:test     # applies ALL migrations to a throwaway Postgres + 69 SQL assertions
+npm run db:test     # applies ALL migrations to a throwaway Postgres + 84 SQL assertions
 npm run build       # production build; app routes must be dynamic (ƒ)
 ```
 
@@ -58,7 +60,7 @@ the SQL layer — including the XP ledger rules — actually behaves as document
 ## Project layout
 
 ```
-src/app/(app)/        signed-in shell + dashboard, missions, habits, quests, settings
+src/app/(app)/        signed-in shell + dashboard, missions, habits, quests, review, settings
 src/app/(auth|login)  auth callback, sign out, magic-link login
 src/components/       UI building blocks (ui.tsx, ActionForm, MissionCard, HabitCard, nav)
 src/lib/              pure engines (progression, habits, finance, dates, validation)

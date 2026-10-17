@@ -22,6 +22,9 @@ export function ActionForm({
   hidden,
   resetOnSuccess = true,
   className,
+  disabled,
+  ariaLabel,
+  title,
 }: {
   action: ServerAction;
   children: ReactNode;
@@ -31,6 +34,11 @@ export function ActionForm({
   hidden?: Record<string, string>;
   resetOnSuccess?: boolean;
   className?: string;
+  /** Renders the submit button as unavailable (e.g. a move that cannot happen). */
+  disabled?: boolean;
+  /** Accessible name for a button whose visible text is a glyph. */
+  ariaLabel?: string;
+  title?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
   const statusId = useId();
@@ -50,7 +58,14 @@ export function ActionForm({
           : null}
         {children}
         <div className="row">
-          <button className={submitClassName} type="submit" disabled={pending} aria-describedby={statusId}>
+          <button
+            className={submitClassName}
+            type="submit"
+            disabled={pending || disabled}
+            aria-label={ariaLabel}
+            title={title}
+            aria-describedby={statusId}
+          >
             {pending ? pendingLabel : submitLabel}
           </button>
         </div>
@@ -82,6 +97,9 @@ export function ActionButton({
   variant = "secondary",
   confirm,
   pendingLabel,
+  disabled,
+  ariaLabel,
+  title,
 }: {
   action: ServerAction;
   label: string;
@@ -89,6 +107,9 @@ export function ActionButton({
   variant?: "secondary" | "danger" | "ghost";
   confirm?: string;
   pendingLabel?: string;
+  disabled?: boolean;
+  ariaLabel?: string;
+  title?: string;
 }) {
   return (
     <ActionForm
@@ -98,6 +119,9 @@ export function ActionButton({
       pendingLabel={pendingLabel ?? label}
       hidden={fields}
       resetOnSuccess={false}
+      disabled={disabled}
+      ariaLabel={ariaLabel}
+      title={title}
     >
       {confirm ? <input type="hidden" name="confirm" value="yes" /> : null}
     </ActionForm>

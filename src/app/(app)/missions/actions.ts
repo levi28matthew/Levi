@@ -2,12 +2,15 @@
 
 import { revalidateStats, requireUser, runAchievementSweep } from "@/lib/auth";
 import { failure, success, type ActionResult } from "@/lib/action-result";
+import { getMissionsForDate } from "@/lib/queries";
+import { moveInOrder, reorderTargets } from "@/lib/ordering";
 import {
   cleanId,
   cleanMissionDate,
   cleanMissionPriority,
   cleanMissionStatus,
   cleanMissionTitle,
+  cleanMoveDirection,
   cleanOptionalMinutes,
   cleanOptionalText,
   cleanSuccessCriteria,
@@ -138,5 +141,56 @@ export async function updateMissionPlan(_state: ActionResult | null, formData: F
     return success("Mission plan updated.");
   } catch (error) {
     return failure(error, "The mission plan could not be updated.");
+  }
+}
+
+/**
+ * Move an open mission one place earlier or later in its day.
+ *
+ * The browser only says *which way*; the order itself is read from the database and
+ * the whole day's list is rebuilt here before `reorder_missions()` is called. A
+ * client can therefore never invent an order, drop a mission from it, or renumber
+ * anybody else's plan — and a stale form (the mission was resolved, or the page was
+ * left open) does nothing instead of shuffling the list wrongly.
+ */
+export async function moveMission(_state: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  try {
+    const { supabase } = await requireUser();
+    const missionId = cleanId(formData.get("missionId"), "A mission");
+    const missionDate = cleanMissionDate(formData.get("missionDate"), "A mission date");
+    const direction = cleanMoveDirection(formData.get("direction"));
+
+    const missions = await getMissionsForDate(supabase, missionDate);
+    const mission = missions.find((row) => row.id === missionId);
+    if (!mission) {
+      return { ok: false, error: "That mission is no longer planned for this day. Reload the page and try again." };
+    }
+    if (mission.status !== "planned" && mission.status !== "active") {
+      return { ok: false, error: "Only open missions can be reordered — resolved work is a record, not a plan." };
+    }
+
+    const openIds = missions
+      .filter((row) => row.status === "planned" || row.status === "active")
+      .map((row) => row.id);
+    const targets = reorderTargets(openIds, missionId, direction);
+    if (!targets) {
+      // Not an error: the mission is already where the user wants it.
+      return success(
+        direction === "up" ? `“${mission.title}” is already first in the day.` : `“${mission.title}” is already last in the day.`,
+      );
+    }
+
+    const order = moveInOrder(
+      missions.map((row) => row.id),
+      openIds[targets.currentIndex],
+      openIds[targets.targetIndex],
+    );
+    const { error } = await supabase.rpc("reorder_missions", { p_mission_date: missionDate, p_ids: order });
+    if (error) throw new Error(error.message);
+
+    revalidateStats();
+    return success(`“${mission.title}” moved ${direction === "up" ? "earlier" : "later"}.`);
+  } catch (error) {
+    return failure(error, "The mission order could not be changed.");
   }
 }

@@ -1,9 +1,7 @@
 import { ActionButton, ActionForm } from "@/components/ActionForm";
 import { Badge } from "@/components/ui";
-import { deleteMission, reopenMission, setMissionStatus, updateMissionPlan } from "@/app/(app)/missions/actions";
+import { deleteMission, moveMission, reopenMission, setMissionStatus, updateMissionPlan } from "@/app/(app)/missions/actions";
 import type { MissionRow } from "@/lib/queries";
-
-const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 function formatMinutes(minutes: number | null): string | null {
   if (!minutes) return null;
@@ -13,10 +11,6 @@ function formatMinutes(minutes: number | null): string | null {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
-export function missionSortKey(mission: MissionRow): number {
-  return PRIORITY_ORDER[mission.priority] ?? 9;
-}
-
 /**
  * One mission with every action that is legal for its current state.
  *
@@ -24,20 +18,29 @@ export function missionSortKey(mission: MissionRow): number {
  * blocked one can be *undone* back to the plan (which retracts the reason, because the
  * mission was not really skipped); a completed one can be reopened, which withdraws
  * its XP instead of duplicating it. Nothing is silently dropped.
+ *
+ * When `canMoveUp`/`canMoveDown` are provided, the card also carries the two order
+ * controls. They only exist for open missions on the day's plan: the server decides
+ * what a move means, the client only says which way.
  */
 export function MissionCard({
   mission,
   today,
   questTitle,
   showDate = false,
+  canMoveUp,
+  canMoveDown,
 }: {
   mission: MissionRow;
   today: string;
   questTitle?: string | null;
   showDate?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
 }) {
   const estimate = formatMinutes(mission.estimate_minutes);
   const overdue = mission.mission_date < today && (mission.status === "planned" || mission.status === "active");
+  const reorderable = canMoveUp !== undefined || canMoveDown !== undefined;
 
   return (
     <article className="item">
@@ -65,6 +68,30 @@ export function MissionCard({
       </div>
 
       <div className="item-actions">
+        {reorderable ? (
+          <span className="row" style={{ gap: 4 }} title="Your saved order for this day">
+            <ActionButton
+              action={moveMission}
+              label="↑"
+              fields={{ missionId: mission.id, missionDate: mission.mission_date, direction: "up" }}
+              variant="ghost"
+              disabled={!canMoveUp}
+              ariaLabel={`Move “${mission.title}” earlier in the day`}
+              title="Move earlier in the day"
+              pendingLabel="…"
+            />
+            <ActionButton
+              action={moveMission}
+              label="↓"
+              fields={{ missionId: mission.id, missionDate: mission.mission_date, direction: "down" }}
+              variant="ghost"
+              disabled={!canMoveDown}
+              ariaLabel={`Move “${mission.title}” later in the day`}
+              title="Move later in the day"
+              pendingLabel="…"
+            />
+          </span>
+        ) : null}
         {mission.status === "planned" ? (
           <ActionButton action={setMissionStatus} label="Start" fields={{ missionId: mission.id, status: "active" }} />
         ) : null}

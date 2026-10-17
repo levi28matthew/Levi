@@ -17,7 +17,6 @@ import {
   isSupabaseConfigured,
   type PlayerStats,
 } from "@/lib/queries";
-import { missionSortKey } from "@/components/MissionCard";
 import { formatXp } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Command Center · LEVI OS" };
@@ -76,9 +75,9 @@ export default async function DashboardPage() {
   const stats = statsRow ?? EMPTY_STATS;
   const counts = countByStatus(missions);
   const resolvedToday = counts.completed + counts.skipped;
-  const openMissions = missions
-    .filter((mission) => mission.status === "planned" || mission.status === "active")
-    .sort((a, b) => missionSortKey(a) - missionSortKey(b));
+  // "Next up" is the top of the user's own saved order for today — the same order
+  // the Missions screen shows — not a priority computed here.
+  const openMissions = missions.filter((mission) => mission.status === "planned" || mission.status === "active");
   const primary = openMissions[0] ?? null;
 
   const doneToday = new Set(todayLogs.filter((log) => log.completed).map((log) => log.habit_id));

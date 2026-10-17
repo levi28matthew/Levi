@@ -7,6 +7,7 @@ import {
   isoWeekday,
   startOfWeek,
   toCalendarDate,
+  toLocalTime,
   uniqueSortedDates,
 } from "./dates";
 
@@ -30,6 +31,16 @@ describe("calendar dates", () => {
     // 2026-03-08 is the US spring-forward date; 09:30 UTC is 01:30 local (still the 8th).
     expect(toCalendarDate("2026-03-08T09:30:00.000Z", "America/New_York")).toBe("2026-03-08");
     expect(toCalendarDate("2026-03-08T07:30:00.000Z", "America/New_York")).toBe("2026-03-08");
+  });
+
+  it("shows the local clock time of an instant, including half-hour zones", () => {
+    expect(toLocalTime("2026-01-01T02:05:00.000Z", "UTC")).toBe("02:05");
+    expect(toLocalTime("2026-01-01T02:05:00.000Z", "America/Los_Angeles")).toBe("18:05");
+    expect(toLocalTime("2026-01-01T02:05:00.000Z", "Asia/Kolkata")).toBe("07:35");
+    expect(toLocalTime("2026-01-01T00:00:00.000Z", "UTC")).toBe("00:00");
+    // 09:30 UTC on the US spring-forward date is 04:30 EDT, not 05:30.
+    expect(toLocalTime("2026-03-08T09:30:00.000Z", "America/New_York")).toBe("04:30");
+    expect(() => toLocalTime("not an instant", "UTC")).toThrow();
   });
 
   it("adds days across month, year and leap boundaries", () => {

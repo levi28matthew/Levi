@@ -12,6 +12,7 @@ export type XpSource =
 export type MissionStatus = "planned" | "active" | "completed" | "skipped" | "blocked";
 export type MissionPriority = "urgent" | "high" | "normal" | "low";
 export type ProgressStatus = "not_started" | "in_progress" | "done";
+export type FocusEndReason = "completed" | "discarded";
 
 /**
  * Shapes of the objects Supabase returns. Kept hand-written (rather than generated)
@@ -184,6 +185,24 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      focus_sessions: {
+        Row: {
+          id: string;
+          user_id: string;
+          mission_id: string | null;
+          intent: string;
+          note: string | null;
+          started_at: string;
+          ended_at: string | null;
+          ended_reason: FocusEndReason | null;
+          created_at: string;
+          updated_at: string;
+        };
+        /** Written only by start_focus_session() / end_focus_session(). */
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: {
       quest_progress: {
@@ -230,6 +249,24 @@ export interface Database {
           awarded_at: string;
           lifetime_xp_after: number;
           level_after: number;
+        };
+        Relationships: [];
+      };
+      focus_session_log: {
+        Row: {
+          id: string;
+          user_id: string;
+          mission_id: string | null;
+          intent: string;
+          note: string | null;
+          started_at: string;
+          ended_at: string | null;
+          ended_reason: FocusEndReason | null;
+          /** The caller's local calendar date the session started on. */
+          started_on: string;
+          elapsed_seconds: number;
+          /** True only once the session has been ended and counted. */
+          counted: boolean;
         };
         Relationships: [];
       };
@@ -293,6 +330,28 @@ export interface Database {
         Returns: { unlocked_achievement_id: string; xp_awarded: number }[];
       };
       set_time_zone: { Args: { p_time_zone: string }; Returns: string };
+      start_focus_session: {
+        Args: { p_intent: string; p_mission_id?: string | null };
+        Returns: string;
+      };
+      end_focus_session: {
+        Args: { p_session_id: string; p_discard?: boolean };
+        Returns: { session_id: string; elapsed_seconds: number; already_ended: boolean }[];
+      };
+      focus_summary: {
+        Args: { p_date: string; p_time_zone: string };
+        Returns: {
+          sessions_total: number;
+          sessions_completed: number;
+          sessions_discarded: number;
+          sessions_open: number;
+          focused_seconds: number;
+        }[];
+      };
+      reorder_missions: {
+        Args: { p_mission_date: string; p_ids: string[] };
+        Returns: number;
+      };
     };
     Enums: {
       quest_kind: QuestKind;

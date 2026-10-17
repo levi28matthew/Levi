@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ActionForm } from "@/components/ActionForm";
-import { MissionCard, missionSortKey } from "@/components/MissionCard";
+import { MissionCard } from "@/components/MissionCard";
 import { ConfigurationNotice, EmptyState, Field, PageHeader, Panel, SignedOutState } from "@/components/ui";
 import { addDays, isValidDateString } from "@/lib/dates";
 import {
@@ -47,9 +47,10 @@ export default async function MissionsPage({
   ]);
 
   const counts = countByStatus(missions);
-  const open = missions
-    .filter((mission) => mission.status === "planned" || mission.status === "active")
-    .sort((a, b) => missionSortKey(a) - missionSortKey(b));
+  // The plan is shown in the order the user saved, never in a computed one:
+  // priority is a label, the order is theirs. `getMissionsForDate` already sorts by
+  // (position, created_at), so this filter keeps the stored order intact.
+  const open = missions.filter((mission) => mission.status === "planned" || mission.status === "active");
   const resolved = missions.filter((mission) => mission.status === "skipped" || mission.status === "blocked");
   const done = missions.filter((mission) => mission.status === "completed");
   const questTitles = new Map(quests.map((quest) => [quest.id, quest.title]));
@@ -172,16 +173,23 @@ export default async function MissionsPage({
         <div className="stack-sm">
           <p className="eyebrow">In play</p>
           <h2>Open missions</h2>
+          <p className="muted">
+            Ordered by you, not by priority: ↑ and ↓ move a mission one place and the order is saved in the
+            database, so it is the same after a refresh or on another device. Resolved missions keep their
+            place in the record underneath.
+          </p>
           {open.length === 0 ? (
             <EmptyState title="Nothing open for this day" description="Add a mission above, or pick another date if this day is already finished." />
           ) : (
             <div className="items">
-              {open.map((mission) => (
+              {open.map((mission, index) => (
                 <MissionCard
                   key={mission.id}
                   mission={mission}
                   today={today}
                   questTitle={mission.quest_id ? questTitles.get(mission.quest_id) ?? null : null}
+                  canMoveUp={index > 0}
+                  canMoveDown={index < open.length - 1}
                 />
               ))}
             </div>

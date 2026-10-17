@@ -12,6 +12,7 @@ const HABIT_NAME_MAX = 120;
 const REASON_MAX = 2_000;
 const CATEGORY_MAX = 60;
 const SUCCESS_CRITERIA_MAX = 500;
+const FOCUS_INTENT_MAX = 200;
 
 const PRIORITIES: readonly MissionPriority[] = ["urgent", "high", "normal", "low"];
 const STATUSES: readonly MissionStatus[] = ["planned", "active", "completed", "skipped", "blocked"];
@@ -125,4 +126,22 @@ export function cleanId(value: FormDataEntryValue | null | undefined, label = "A
     throw new Error(`${label} is not valid.`);
   }
   return id.toLowerCase();
+}
+
+/** An optional id: an empty form value means "none", not "invalid". */
+export function cleanOptionalId(value: FormDataEntryValue | null | undefined, label = "An id"): string | null {
+  const text = raw(value);
+  return text.length === 0 ? null : cleanId(text, label);
+}
+
+/** What a focus session is for. Required: a session has to be about something. */
+export function cleanFocusIntent(value: FormDataEntryValue | null | undefined): string {
+  return cleanRequiredText(value, "What you are focusing on", FOCUS_INTENT_MAX);
+}
+
+/** A reorder direction from the browser. Nothing else is accepted. */
+export function cleanMoveDirection(value: FormDataEntryValue | null | undefined): "up" | "down" {
+  const direction = raw(value);
+  if (direction !== "up" && direction !== "down") throw new Error("A move must be up or down.");
+  return direction;
 }

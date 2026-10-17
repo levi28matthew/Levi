@@ -14,10 +14,17 @@ export async function requireUser() {
 }
 
 /** Paths whose derived statistics change whenever XP, missions or habits change. */
-export const STAT_PATHS = ["/dashboard", "/missions", "/habits", "/quests"] as const;
+export const STAT_PATHS = ["/dashboard", "/missions", "/habits", "/quests", "/review"] as const;
 
 export function revalidateStats(): void {
   for (const path of STAT_PATHS) revalidatePath(path);
+}
+
+/** Paths whose derived figures change when a focus session starts or ends. */
+export const FOCUS_PATHS = ["/focus", "/review"] as const;
+
+export function revalidateFocus(): void {
+  for (const path of FOCUS_PATHS) revalidatePath(path);
 }
 
 /**

@@ -13,6 +13,8 @@ export type HabitLogRow = Tables<"habit_logs">;
 export type LevelHistoryRow = Views<"level_history">;
 export type AchievementRow = Tables<"achievements">;
 export type QuestStepRow = Tables<"quest_steps">;
+export type FocusSessionRow = Tables<"focus_sessions">;
+export type FocusSessionLogRow = Views<"focus_session_log">;
 
 export interface HabitSummary {
   habit_id: string;
@@ -215,6 +217,59 @@ export async function getHabitLogsBetween(
     .gte("log_date", from)
     .lte("log_date", to);
   if (error) throw new Error(`Could not load habit logs: ${error.message}`);
+  return data ?? [];
+}
+
+/**
+ * One local calendar day of focus, summarised by the database from the sessions.
+ * The rules (which day a session belongs to, and what counts) live in SQL, so the
+ * screen can only ever display what the database decided.
+ */
+export interface FocusSummary {
+  sessions_total: number;
+  sessions_completed: number;
+  sessions_discarded: number;
+  sessions_open: number;
+  focused_seconds: number;
+}
+
+export async function getFocusSummary(
+  supabase: SupabaseServerClient,
+  date: string,
+  timeZone: string,
+): Promise<FocusSummary> {
+  const { data, error } = await supabase.rpc("focus_summary", { p_date: date, p_time_zone: timeZone });
+  if (error) throw new Error(`Could not load the focus summary: ${error.message}`);
+  const row = (data ?? [])[0];
+  if (!row) throw new Error("Could not load the focus summary: the database returned no summary row.");
+  return row;
+}
+
+/** The session running right now, if any. The database allows at most one. */
+export async function getRunningFocusSession(supabase: SupabaseServerClient): Promise<FocusSessionRow | null> {
+  const { data, error } = await supabase.from("focus_sessions").select("*").is("ended_at", null).maybeSingle();
+  if (error) throw new Error(`Could not load the running focus session: ${error.message}`);
+  return data ?? null;
+}
+
+/** Every session that started on a local calendar day, oldest first. */
+export async function getFocusSessionsForDay(supabase: SupabaseServerClient, date: string): Promise<FocusSessionLogRow[]> {
+  const { data, error } = await supabase
+    .from("focus_session_log")
+    .select("*")
+    .eq("started_on", date)
+    .order("started_at");
+  if (error) throw new Error(`Could not load focus sessions for this day: ${error.message}`);
+  return data ?? [];
+}
+
+export async function getRecentFocusSessions(supabase: SupabaseServerClient, limit = 15): Promise<FocusSessionLogRow[]> {
+  const { data, error } = await supabase
+    .from("focus_session_log")
+    .select("*")
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`Could not load recent focus sessions: ${error.message}`);
   return data ?? [];
 }
 

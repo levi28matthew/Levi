@@ -562,6 +562,342 @@ select public.test_assert(
 set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
 
 -- ---------------------------------------------------------------------------
+-- Focus sessions: measured time, at most one running session, no XP
+-- ---------------------------------------------------------------------------
+select total_xp as xp_before_focus from public.player_stats \gset
+select count(*) as ledger_before_focus from public.xp_ledger \gset
+
+-- A blank intent is not a session.
+do $$
+begin
+  begin
+    perform public.start_focus_session('   ');
+    raise exception 'ASSERTION FAILED: a blank focus intent was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a focus session needs a real intent (%)', sqlerrm;
+  end;
+end $$;
+
+-- The first session is linked to a mission the caller owns; the link is stored.
+select public.start_focus_session('Finish the audit', :'mission_id') as focus_id \gset
+select public.test_assert(
+  (select count(*) from public.focus_sessions where ended_at is null) = 1
+    and (select mission_id from public.focus_sessions where id = :'focus_id') = :'mission_id',
+  'starting a focus session opens exactly one, linked to the chosen mission'
+);
+
+-- A second running session is impossible, whichever way it is attempted.
+do $$
+begin
+  begin
+    perform public.start_focus_session('Second session while the first runs');
+    raise exception 'ASSERTION FAILED: two running focus sessions were accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a second focus session is rejected while one runs';
+  end;
+end $$;
+
+select public.end_focus_session(:'focus_id');
+select public.test_assert(
+  (select ended_reason from public.focus_sessions where id = :'focus_id') = 'completed'
+    and (select ended_at from public.focus_sessions where id = :'focus_id') is not null,
+  'ending a session records a real end time and a completed reason'
+);
+select public.test_assert(
+  (select already_ended from public.end_focus_session(:'focus_id')) is true,
+  'ending an already-ended session is a no-op that reports the truth'
+);
+select public.test_assert(
+  (select count(*) from public.focus_sessions where id = :'focus_id') = 1,
+  'a double submit never creates a second session'
+);
+select public.test_assert(
+  (select counted from public.focus_session_log where id = :'focus_id') is true
+    and (select started_on from public.focus_session_log where id = :'focus_id') = current_date,
+  'the session log dates each session on the local day it started and flags what counts'
+);
+
+-- An interrupted session: opened, then never ended properly. The user can
+-- discard it instead, which keeps the record but banks none of the time.
+select public.start_focus_session('Left running by accident') as discard_id \gset
+select public.test_assert(
+  (select sessions_open from public.focus_summary(current_date, 'UTC')) = 1,
+  'a running session is reported as open, not as focused time'
+);
+select public.test_assert(
+  (select focused_seconds from public.focus_summary(current_date, 'UTC')) =
+    (select floor(extract(epoch from (ended_at - started_at)))::bigint
+     from public.focus_sessions where id = :'focus_id'),
+  'focused time counts only the session that was actually ended'
+);
+reset role;
+do $$
+begin
+  begin
+    insert into public.focus_sessions (user_id, intent)
+    values ('11111111-1111-1111-1111-111111111111', 'Bypass attempt');
+    raise exception 'ASSERTION FAILED: the one-open-session rule could be bypassed';
+  exception when unique_violation then
+    raise notice 'ok - the one running session rule is a real unique index, not a check that can be skipped';
+  end;
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+
+select public.end_focus_session(:'discard_id', true);
+select public.test_assert(
+  (select sessions_completed from public.focus_summary(current_date, 'UTC')) = 1
+    and (select sessions_discarded from public.focus_summary(current_date, 'UTC')) = 1
+    and (select sessions_open from public.focus_summary(current_date, 'UTC')) = 0,
+  'a discarded session is recorded separately from a completed one'
+);
+select public.test_assert(
+  (select focused_seconds from public.focus_summary(current_date, 'UTC')) =
+    (select floor(extract(epoch from (ended_at - started_at)))::bigint
+     from public.focus_sessions where id = :'focus_id'),
+  'a discarded session contributes no focused time'
+);
+select public.test_assert(
+  (select counted from public.focus_session_log where id = :'discard_id') is false,
+  'a discarded session is never counted as focused time'
+);
+select public.test_assert(
+  (select sessions_total from public.focus_summary(current_date - 1000, 'UTC')) = 0
+    and (select focused_seconds from public.focus_summary(current_date - 1000, 'UTC')) = 0,
+  'a day with no focus sessions summarises to zeros'
+);
+
+do $$
+begin
+  begin
+    perform count(*) from public.focus_summary(current_date, 'Mars/Olympus_Mons');
+    raise exception 'ASSERTION FAILED: a focus summary accepted an unrecognized time zone';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a focus summary rejects an unrecognized time zone';
+  end;
+end $$;
+
+-- Another account can neither see, end, nor link to this user's records.
+-- (psql does not substitute variables inside dollar-quoted blocks, so the real
+-- ids are carried across in session settings rather than faked.)
+select set_config('levi.test_session_id', :'focus_id', false);
+select set_config('levi.test_mission_id', :'mission_id', false);
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.test_assert(
+  (select count(*) from public.focus_sessions) = 0,
+  'another user sees no focus sessions'
+);
+do $$
+declare v_session uuid := current_setting('levi.test_session_id')::uuid;
+begin
+  begin
+    -- A real session id, captured above: knowing it does not help.
+    perform public.end_focus_session(v_session);
+    raise exception 'ASSERTION FAILED: another user ended a focus session';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a session that is not the caller''s is reported as not found (%)', sqlerrm;
+  end;
+end $$;
+do $$
+declare v_mission uuid := current_setting('levi.test_mission_id')::uuid;
+begin
+  begin
+    -- A real mission id, belonging to somebody else: ownership is checked, not guessed.
+    perform public.start_focus_session('Steal a mission', v_mission);
+    raise exception 'ASSERTION FAILED: a session was linked to a mission that is not the caller''s';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a focus session cannot be linked to a mission the caller does not own';
+  end;
+end $$;
+select public.test_assert(
+  (select count(*) from public.focus_sessions) = 0,
+  'a rejected start creates nothing'
+);
+
+-- Focus sessions are read-only for clients: every write goes through the RPCs.
+do $$
+begin
+  begin
+    insert into public.focus_sessions (user_id, intent)
+    values ('22222222-2222-2222-2222-222222222222', 'Direct write');
+    raise exception 'ASSERTION FAILED: a client could insert a focus session directly';
+  exception when insufficient_privilege then
+    raise notice 'ok - clients cannot insert focus sessions directly';
+  end;
+end $$;
+do $$
+begin
+  begin
+    update public.focus_sessions set intent = 'rewritten';
+    raise exception 'ASSERTION FAILED: a client could rewrite a focus session';
+  exception when insufficient_privilege then
+    raise notice 'ok - clients cannot update focus sessions directly';
+  end;
+end $$;
+do $$
+begin
+  begin
+    delete from public.focus_sessions;
+    raise exception 'ASSERTION FAILED: a client could delete a focus session';
+  exception when insufficient_privilege then
+    raise notice 'ok - clients cannot delete focus sessions directly';
+  end;
+end $$;
+
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.test_assert(
+  (select total_xp from public.player_stats) = :xp_before_focus
+    and (select count(*) from public.xp_ledger) = :ledger_before_focus,
+  'focus sessions award no XP and write nothing to the ledger'
+);
+
+-- ---------------------------------------------------------------------------
+-- Persistent mission ordering: one explicit order per day, owner-only
+-- ---------------------------------------------------------------------------
+select public.create_mission(current_date - 5, 'First in the plan', 'low') as ord_a \gset
+select public.create_mission(current_date - 5, 'Second in the plan', 'urgent') as ord_b \gset
+select public.create_mission(current_date - 5, 'Third in the plan', 'normal') as ord_c \gset
+select public.test_assert(
+  (select array_agg(id order by position, created_at) from public.daily_missions where mission_date = current_date - 5)
+    = array[:'ord_a'::uuid, :'ord_b'::uuid, :'ord_c'::uuid],
+  'a new mission is appended to the end of its day''s order'
+);
+
+select public.test_assert(
+  public.reorder_missions(current_date - 5, array[:'ord_c'::uuid, :'ord_a'::uuid, :'ord_b'::uuid]) = 3,
+  'reordering a day updates every mission of that day'
+);
+select public.test_assert(
+  (select array_agg(id order by position, created_at) from public.daily_missions where mission_date = current_date - 5)
+    = array[:'ord_c'::uuid, :'ord_a'::uuid, :'ord_b'::uuid],
+  'the stored order is exactly the order that was requested, and survives a re-read'
+);
+select public.test_assert(
+  (select array_agg(position order by position) from public.daily_missions where mission_date = current_date - 5)
+    = array[0, 1, 2],
+  'positions are renumbered to 0..n-1 with no gaps and no duplicates'
+);
+
+-- Reordering a single-mission day is legal and leaves position 0.
+select public.create_mission(current_date - 6, 'Only mission of the day', 'normal') as solo_ord \gset
+select public.test_assert(
+  public.reorder_missions(current_date - 6, array[:'solo_ord'::uuid]) = 1
+    and (select position from public.daily_missions where id = :'solo_ord') = 0,
+  'a one-mission day can be reordered to itself'
+);
+
+do $$
+begin
+  begin
+    perform public.reorder_missions(current_date - 5,
+      array[(select id from public.daily_missions where title = 'First in the plan'),
+            (select id from public.daily_missions where title = 'First in the plan'),
+            (select id from public.daily_missions where title = 'Third in the plan')]);
+    raise exception 'ASSERTION FAILED: a duplicate mission in an order was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - an order cannot list the same mission twice (%)', sqlerrm;
+  end;
+
+  begin
+    perform public.reorder_missions(current_date - 5,
+      array[(select id from public.daily_missions where title = 'First in the plan'),
+            (select id from public.daily_missions where title = 'Second in the plan')]);
+    raise exception 'ASSERTION FAILED: a partial mission order was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - a partial order is rejected because it could not place the missions it omits';
+  end;
+
+  begin
+    perform public.reorder_missions(current_date - 5, array[null::uuid, gen_random_uuid(), gen_random_uuid()]);
+    raise exception 'ASSERTION FAILED: an order with an empty entry was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - an order cannot contain an empty entry';
+  end;
+
+  begin
+    perform public.reorder_missions(current_date - 5, array[]::uuid[]);
+    raise exception 'ASSERTION FAILED: an empty order was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - an empty order is rejected';
+  end;
+
+  begin
+    -- Every id here is the caller's own, but one is planned for another day.
+    perform public.reorder_missions(current_date - 5,
+      array[(select id from public.daily_missions where title = 'First in the plan'),
+            (select id from public.daily_missions where title = 'Second in the plan'),
+            (select id from public.daily_missions where title = 'Draft plan (edited)')]);
+    raise exception 'ASSERTION FAILED: a mission from another day was accepted into the order';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - an order can only contain missions planned for that day';
+  end;
+end $$;
+
+-- Another account's missions are not even visible, let alone orderable.
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+select public.create_mission(current_date - 5, 'Their own mission', 'normal') as b_mission \gset
+select set_config('levi.test_ord_a', :'ord_a', false);
+select set_config('levi.test_b_mission', :'b_mission', false);
+do $$
+declare
+  v_ids uuid[] := array[
+    current_setting('levi.test_b_mission')::uuid,
+    current_setting('levi.test_ord_a')::uuid
+  ];
+begin
+  begin
+    -- One of the caller's own ids plus a *known* id from another account, i.e. the
+    -- exact request a crafted client would send.
+    perform public.reorder_missions(current_date - 5, v_ids);
+    raise exception 'ASSERTION FAILED: a client reordered another user''s missions';
+  exception when others then
+    if sqlerrm like 'ASSERTION FAILED%' then raise; end if;
+    raise notice 'ok - another user''s missions cannot be ordered (%)', sqlerrm;
+  end;
+end $$;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.test_assert(
+  (select array_agg(id order by position, created_at) from public.daily_missions where mission_date = current_date - 5)
+    = array[:'ord_c'::uuid, :'ord_a'::uuid, :'ord_b'::uuid],
+  'a rejected reorder leaves the original order untouched'
+);
+
+-- Ordering a day that already contains completed and skipped work changes the
+-- order only — never the state machine and never the XP.
+select public.reorder_missions(current_date, array[:'skipped_id'::uuid, :'mission_id'::uuid]);
+select public.test_assert(
+  (select status from public.daily_missions where id = :'mission_id') = 'completed'
+    and (select status from public.daily_missions where id = :'skipped_id') = 'skipped'
+    and (select completed_at from public.daily_missions where id = :'mission_id') is not null,
+  'reordering preserves the state of completed and skipped missions'
+);
+select public.test_assert(
+  (select total_xp from public.player_stats) = :xp_before_focus
+    and (select count(*) from public.xp_ledger) = :ledger_before_focus,
+  'reordering never awards or removes XP'
+);
+
+do $$
+begin
+  begin
+    update public.daily_missions set position = 99 where mission_date = current_date - 5;
+    raise exception 'ASSERTION FAILED: a client could write a mission position directly';
+  exception when insufficient_privilege then
+    raise notice 'ok - positions are only writable through reorder_missions';
+  end;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- Misuse: adjustments cannot unbalance an award
 -- ---------------------------------------------------------------------------
 reset role;

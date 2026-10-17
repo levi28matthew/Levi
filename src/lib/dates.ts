@@ -58,6 +58,27 @@ export function toCalendarDate(instant: Date | string | number, timeZone: string
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * `HH:MM` for an instant in a time zone, for showing *when* something happened
+ * next to a date that was derived with `toCalendarDate`. Throws rather than
+ * guessing when the instant or the zone is unusable.
+ */
+export function toLocalTime(instant: Date | string | number, timeZone: string): string {
+  const date = instant instanceof Date ? instant : new Date(instant);
+  if (Number.isNaN(date.getTime())) throw new Error("Cannot derive a time from an invalid instant.");
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const lookup = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  const hour = lookup("hour");
+  const minute = lookup("minute");
+  if (!hour || !minute) throw new Error(`Unable to resolve a time for time zone ${timeZone}.`);
+  return `${hour}:${minute}`;
+}
+
 /** Add `days` to a `YYYY-MM-DD` string, returning a `YYYY-MM-DD` string. */
 export function addDays(value: string, days: number): string {
   const date = parseDateString(value);

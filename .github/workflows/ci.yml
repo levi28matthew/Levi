@@ -14,4 +14,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # Applies every migration to a throwaway Postgres and runs the SQL assertions.
+      # Docker is available on ubuntu-latest runners.
+      - run: npm run db:test
       - run: npm run build

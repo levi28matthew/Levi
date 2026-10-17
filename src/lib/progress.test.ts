@@ -18,8 +18,9 @@ describe("progress engine", () => {
     expect(progressFromSubquests([])).toBe(0);
   });
 
-  it("uses the defined level formula", () => {
+  it("delegates levels to the canonical progression engine", () => {
     expect(levelForXp(0)).toBe(1);
-    expect(levelForXp(1_000)).toBe(2);
+    expect(levelForXp(250)).toBe(2);
+    expect(levelForXp(1_000)).toBe(3);
   });
 });
